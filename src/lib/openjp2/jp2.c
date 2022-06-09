@@ -325,6 +325,21 @@ static OPJ_BOOL opj_jp2_read_colr(opj_jp2_t *jp2,
                                   OPJ_UINT32 p_colr_header_size,
                                   opj_event_mgr_t * p_manager);
 
+/**
+ * Reads the Resolution box.
+ *
+ * @param   p_res_header_data          pointer to actual data (already read from file)
+ * @param   jp2                        the jpeg2000 file codec.
+ * @param   p_res_header_size          the size of the resolution header
+ * @param   p_manager                  the user event manager.
+ *
+ * @return  always true
+*/
+static OPJ_BOOL opj_jp2_read_res(opj_jp2_t *jp2,
+                                  OPJ_BYTE * p_res_header_data,
+                                  OPJ_UINT32 p_res_header_size,
+                                  opj_event_mgr_t * p_manager);
+
 /*@}*/
 
 /*@}*/
@@ -434,8 +449,8 @@ static const opj_jp2_header_handler_t jp2_img_header [] = {
     {JP2_BPCC, opj_jp2_read_bpcc},
     {JP2_PCLR, opj_jp2_read_pclr},
     {JP2_CMAP, opj_jp2_read_cmap},
-    {JP2_CDEF, opj_jp2_read_cdef}
-
+    {JP2_CDEF, opj_jp2_read_cdef},
+    {JP2_RES, opj_jp2_read_res}
 };
 
 /**
@@ -1594,6 +1609,95 @@ static OPJ_BOOL opj_jp2_read_colr(opj_jp2_t *jp2,
     return OPJ_TRUE;
 }
 
+/**
+ * Checks whether the given resolution value is inside the allowed margins.
+ */
+static OPJ_BOOL opj_jp2_check_res(OPJ_INT32 value, const OPJ_CHAR* name, OPJ_INT32 min, OPJ_INT32 max, opj_event_mgr_t* p_manager) {
+    if (value < min || value > max) {
+		opj_event_msg(p_manager, EVT_WARNING, "Bad Capture Resolution box (bad %s: %d)\n",
+					  name, value);
+        return OPJ_FALSE;
+    } else {
+		return OPJ_TRUE;
+    }
+}
+
+static OPJ_BOOL opj_jp2_read_res(opj_jp2_t *jp2,
+                                 OPJ_BYTE * p_res_header_data,
+                                 OPJ_UINT32 p_res_header_size,
+                                 opj_event_mgr_t * p_manager
+                                )
+{
+    /* preconditions */
+    assert(jp2 != 00);
+    assert(p_res_header_data != 00);
+    assert(p_manager != 00);
+
+    OPJ_UINT32 l_box_size = 0;
+    opj_jp2_box_t box;
+    if (!opj_jp2_read_boxhdr_char(&box, p_res_header_data, &l_box_size, p_res_header_size, p_manager)) {
+            opj_event_msg(p_manager, EVT_ERROR,
+                          "Stream error while reading Resolution box\n");
+            return OPJ_TRUE;
+    }
+
+	if (box.length > p_res_header_size) {
+		opj_event_msg(p_manager, EVT_ERROR,
+					  "Stream error while reading JP2 Resolution box: box length is inconsistent.\n");
+		return OPJ_TRUE;
+	}
+
+    if (box.type != JP2_RESC) {
+        // Default Display Resolution box is currently not supported
+		return OPJ_TRUE;
+    }
+
+    OPJ_UINT32 l_data_size = box.length - l_box_size;
+    OPJ_BYTE* p_data = p_res_header_data + l_box_size;
+
+    if (l_data_size < 10) {
+		opj_event_msg(p_manager, EVT_ERROR,
+					  "Stream error while reading JP2 Capture Resolution box: box length is inconsistent.\n");
+		return OPJ_TRUE;
+    }
+
+    // Stored as a set of vertical and horizontal numerators, denominators and exponents.
+    OPJ_UINT32 vRcN, vRcD, hRcN, hRcD, vRcE, hRcE;
+    opj_read_bytes(p_data, &vRcN, 2);
+    opj_read_bytes(p_data + 2, &vRcD, 2);
+    opj_read_bytes(p_data + 4, &hRcN, 2);
+    opj_read_bytes(p_data + 6, &hRcD, 2);
+    opj_read_bytes(p_data + 8, &vRcE, 1);
+    opj_read_bytes(p_data + 9, &hRcE, 1);
+
+    if (!opj_jp2_check_res(vRcN, "vRcN", 1, 65535, p_manager)) {
+        return OPJ_TRUE;
+    }
+    if (!opj_jp2_check_res(vRcD, "vRcD", 1, 65535, p_manager)) {
+        return OPJ_TRUE;
+    }
+    if (!opj_jp2_check_res(hRcN, "hRcN", 1, 65535, p_manager)) {
+		return OPJ_TRUE;
+	}
+    if (!opj_jp2_check_res(hRcD, "hRcD", 1, 65535, p_manager)) {
+		return OPJ_TRUE;
+	}
+    if (!opj_jp2_check_res(hRcE, "hRcE", -127, 128, p_manager)) {
+		return OPJ_TRUE;
+	}
+    if (!opj_jp2_check_res(hRcE, "hRcE", -127, 128, p_manager)) {
+		return OPJ_TRUE;
+	}
+
+    assert(vRcD != 0);
+    assert(hRcD != 0);
+
+    jp2->xresolution = (OPJ_FLOAT64)(hRcN) / (OPJ_FLOAT64)(hRcD) * pow(10, hRcE);
+    jp2->yresolution = (OPJ_FLOAT64)(vRcN) / (OPJ_FLOAT64)(vRcD) * pow(10, vRcE);
+
+    return OPJ_TRUE;
+}
+
 OPJ_BOOL opj_jp2_decode(opj_jp2_t *jp2,
                         opj_stream_private_t *p_stream,
                         opj_image_t* p_image,
@@ -1657,6 +1761,9 @@ OPJ_BOOL opj_jp2_decode(opj_jp2_t *jp2,
             jp2->color.icc_profile_buf = NULL;
         }
     }
+
+    p_image->xresolution = jp2->xresolution;
+    p_image->yresolution = jp2->yresolution;
 
     return OPJ_TRUE;
 }

@@ -59,6 +59,9 @@
 #define     JP2_DTBL 0x6474626c    /**< Data Reference box */
 #define     JP2_BPCC 0x62706363    /**< Bits per component box */
 #define     JP2_JP2  0x6a703220    /**< File type fields */
+#define     JP2_RES  0x72657320    /**< Resolution box (super-box) */
+#define     JP2_RESC 0x72657363    /**< Capture Resolution box */
+#define     JP2_RESD 0x72657364    /**< Default Display Resolution box */
 
 /* For the future */
 /* #define JP2_RES 0x72657320 */  /**< Resolution box (super-box) */
@@ -173,6 +176,8 @@ typedef struct opj_jp2 {
     OPJ_UINT32 numcl;
     OPJ_UINT32 *cl;
     opj_jp2_comps_t *comps;
+    OPJ_FLOAT64 xresolution;
+    OPJ_FLOAT64 yresolution;
     /* FIXME: The following two variables are used to save offset
       as we write out a JP2 file to disk. This mechanism is not flexible
       as codec writers will need to extand those fields as new part
